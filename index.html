@@ -1378,8 +1378,10 @@
     </script>
 
     <script>
-        // Backend API URL
-        const API_BASE = 'http://localhost:3001/api';
+        // Backend API URL - dynamic for production/development
+        const API_BASE = window.location.hostname === 'localhost'
+            ? 'http://localhost:3001/api'
+            : window.location.origin + '/api';
 
         // Elements
         const urlInput = document.getElementById('urlInput');
