@@ -929,6 +929,51 @@
         .warning-state {
             --primary-hue: 45;
         }
+
+        /* User profile styles */
+        .hidden {
+            display: none !important;
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .user-name {
+            font-size: 0.875rem;
+            color: rgba(255, 255, 255, 0.8);
+            font-weight: 500;
+        }
+
+        .logout-btn {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.6);
+            padding: 0.4rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .logout-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .logout-btn .material-symbols-outlined {
+            font-size: 1.25rem;
+        }
+
+        .auth-section .btn-primary {
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
     </style>
 </head>
 
@@ -944,16 +989,25 @@
         <div class="container">
             <div class="logo">
                 <span class="material-symbols-outlined icon">fort</span>
-                <h2>CastleGuard <span>Security</span></h2>
+                <h2>CyberScan <span>Security</span></h2>
             </div>
             <nav>
                 <a href="#">Dashboard</a>
                 <a href="#">History</a>
                 <a href="#">Settings</a>
-                <button class="btn-primary">New Scan</button>
             </nav>
-            <div class="avatar"
-                style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuCcD1yyhW4ilIqKHFrOMZ8LVhWjOyuPjR8_yYE1_oMDX1M2CAL8LSS9npPfgmQ1LzVOakzRwmiUYf0Nqo9-BU9vboVHAOuAP1qZGUEzjIKSa0R6jsdm4w26ynomYxnjfbkNo2uyH6vfEJ8yNunYEDRNg_nKR-AdwHDXH-OmNXJ8B8gviJWz2i_kdbuglSZyPENYscRp6AQEgYOGigninsC5qV5WCJpCYyu4iWnaFEKI0vjnRh37tLywsQREIyYW1t2seAyrY82k4hA");'>
+            <!-- Auth section - dynamic based on login state -->
+            <div class="auth-section" id="authSection">
+                <a href="login.html" class="btn-primary" id="loginBtn">Sign In</a>
+            </div>
+            <!-- User profile (shown when logged in) -->
+            <div class="user-profile hidden" id="userProfile">
+                <span class="user-name" id="userName"></span>
+                <div class="avatar" id="userAvatar" style="background-image: url('https://via.placeholder.com/40');">
+                </div>
+                <button class="logout-btn" id="logoutBtn" onclick="signOut()">
+                    <span class="material-symbols-outlined">logout</span>
+                </button>
             </div>
         </div>
     </header>
@@ -1112,6 +1166,67 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
     <script src="https://unpkg.com/@studio-freight/lenis@1.0.42/dist/lenis.min.js"></script>
+
+    <!-- Firebase Auth Check -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut as firebaseSignOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBseqYXBEJAIcD9PhQyRDFcYK1uwqgQ4hY",
+            authDomain: "castlegaurd-security.firebaseapp.com",
+            projectId: "castlegaurd-security",
+            storageBucket: "castlegaurd-security.firebasestorage.app",
+            messagingSenderId: "611567214125",
+            appId: "1:611567214125:web:b1472049b978b35626e2a4"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+
+        // Check auth state and update header
+        onAuthStateChanged(auth, (user) => {
+            const authSection = document.getElementById('authSection');
+            const userProfile = document.getElementById('userProfile');
+            const userName = document.getElementById('userName');
+            const userAvatar = document.getElementById('userAvatar');
+
+            if (user) {
+                // User is signed in
+                authSection.classList.add('hidden');
+                userProfile.classList.remove('hidden');
+                userName.textContent = user.displayName || user.email.split('@')[0];
+                if (user.photoURL) {
+                    userAvatar.style.backgroundImage = `url('${user.photoURL}')`;
+                }
+                // Save user data to localStorage for API requests
+                localStorage.setItem('cyberscan_user', JSON.stringify({
+                    uid: user.uid,
+                    email: user.email,
+                    displayName: user.displayName,
+                    photoURL: user.photoURL
+                }));
+                localStorage.setItem('cyberscan_tos_accepted', 'true');
+            } else {
+                // User is signed out
+                authSection.classList.remove('hidden');
+                userProfile.classList.add('hidden');
+                localStorage.removeItem('cyberscan_user');
+            }
+        });
+
+        // Sign out function
+        window.signOut = async function () {
+            try {
+                await firebaseSignOut(auth);
+                localStorage.removeItem('cyberscan_user');
+                localStorage.removeItem('cyberscan_tos_accepted');
+                window.location.reload();
+            } catch (error) {
+                console.error('Sign out error:', error);
+            }
+        };
+    </script>
 
     <script>
         // Backend API URL
