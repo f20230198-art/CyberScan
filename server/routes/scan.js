@@ -13,16 +13,7 @@ const { testSQLi } = require('../scanners/sqliTester');
 const { testXSS, testURLParams } = require('../scanners/xssTester');
 const { lookupDNS } = require('../scanners/dnsLookup');
 const { calculateScore, getRecommendations } = require('../utils/scoreCalculator');
-
-// Validate URL
-function isValidUrl(string) {
-    try {
-        const url = new URL(string);
-        return url.protocol === 'http:' || url.protocol === 'https:';
-    } catch (_) {
-        return false;
-    }
-}
+const { rateLimiter, requireToS, logScan, validateURL } = require('../middleware/security');
 
 // Normalize URL
 function normalizeUrl(url) {
@@ -34,17 +25,20 @@ function normalizeUrl(url) {
 
 /**
  * POST /api/scan
- * Full security scan
+ * Full security scan - Rate limited, ToS required
  */
-router.post('/scan', async (req, res) => {
+router.post('/scan', rateLimiter, requireToS, async (req, res) => {
     const startTime = Date.now();
 
     try {
         let { url, options = {} } = req.body;
 
-        if (!url) {
-            return res.status(400).json({ error: 'URL is required' });
+        // Validate URL with security checks
+        const validation = validateURL(url);
+        if (!validation.valid) {
+            return res.status(400).json({ success: false, error: validation.error });
         }
+        url = validation.url;
 
         url = normalizeUrl(url);
 
@@ -128,6 +122,9 @@ router.post('/scan', async (req, res) => {
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
         console.log(`✅ Scan complete in ${duration}s - Score: ${scoreResult.score}/100 (${scoreResult.status})\n`);
+
+        // Log the scan for security tracking
+        logScan(req, url, { score: scoreResult.score, status: scoreResult.status, scanDuration: `${duration}s` });
 
         res.json({
             success: true,

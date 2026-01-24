@@ -1205,23 +1205,103 @@
         // Real API scan function
         async function performRealScan(url) {
             try {
+                // Check if ToS has been accepted
+                const tosAccepted = localStorage.getItem('cyberscan_tos_accepted') === 'true';
+
                 const response = await fetch(`${API_BASE}/scan`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'X-ToS-Accepted': tosAccepted ? 'true' : 'false'
                     },
-                    body: JSON.stringify({ url })
+                    body: JSON.stringify({ url, tosAccepted })
                 });
 
-                if (!response.ok) {
-                    throw new Error(`Server error: ${response.status}`);
+                const data = await response.json();
+
+                // Handle ToS requirement
+                if (response.status === 403 && data.tosRequired) {
+                    throw new Error('TOS_REQUIRED');
                 }
 
-                return await response.json();
+                // Handle rate limiting
+                if (response.status === 429) {
+                    throw new Error(`Rate limited. Please wait ${data.retryAfter || 60} seconds.`);
+                }
+
+                if (!response.ok) {
+                    throw new Error(data.error || `Server error: ${response.status}`);
+                }
+
+                return data;
             } catch (error) {
                 console.error('Scan error:', error);
                 throw error;
             }
+        }
+
+        // Show ToS modal and get acceptance
+        function showToSModal() {
+            return new Promise((resolve) => {
+                const modal = document.createElement('div');
+                modal.className = 'tos-modal-overlay';
+                modal.innerHTML = `
+                    <div class="tos-modal">
+                        <h3>📜 Terms of Service</h3>
+                        <p>By using CyberScan, you agree to:</p>
+                        <ul>
+                            <li>✓ Only scan websites you own or have permission to test</li>
+                            <li>✓ Not use this tool for malicious purposes</li>
+                            <li>✓ Accept responsibility for your actions</li>
+                            <li>✓ Not attempt to circumvent rate limits</li>
+                        </ul>
+                        <p class="warning">⚠️ Unauthorized security testing is illegal!</p>
+                        <div class="tos-buttons">
+                            <button class="tos-decline">Decline</button>
+                            <button class="tos-accept">I Accept</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+
+                // Add styles
+                const style = document.createElement('style');
+                style.textContent = `
+                    .tos-modal-overlay {
+                        position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+                        display: flex; align-items: center; justify-content: center; z-index: 200;
+                    }
+                    .tos-modal {
+                        background: linear-gradient(135deg, #1a0b0b, #0f0505);
+                        border: 2px solid var(--primary-color); border-radius: 1rem;
+                        padding: 2rem; max-width: 450px; text-align: left;
+                    }
+                    .tos-modal h3 { font-size: 1.5rem; margin-bottom: 1rem; }
+                    .tos-modal ul { margin: 1rem 0; padding-left: 1rem; list-style: none; }
+                    .tos-modal li { margin: 0.5rem 0; color: rgba(255,255,255,0.8); }
+                    .tos-modal .warning { color: #eab308; font-weight: bold; margin: 1rem 0; }
+                    .tos-buttons { display: flex; gap: 1rem; margin-top: 1.5rem; }
+                    .tos-decline {
+                        flex: 1; padding: 0.75rem; border: 1px solid #666;
+                        background: transparent; color: #999; border-radius: 0.5rem; cursor: pointer;
+                    }
+                    .tos-accept {
+                        flex: 2; padding: 0.75rem; background: var(--primary-color);
+                        color: white; border: none; border-radius: 0.5rem; font-weight: bold; cursor: pointer;
+                    }
+                `;
+                document.head.appendChild(style);
+
+                modal.querySelector('.tos-accept').onclick = () => {
+                    localStorage.setItem('cyberscan_tos_accepted', 'true');
+                    modal.remove();
+                    resolve(true);
+                };
+                modal.querySelector('.tos-decline').onclick = () => {
+                    modal.remove();
+                    resolve(false);
+                };
+            });
         }
 
         // Update UI with real scan results
@@ -1424,6 +1504,18 @@
                 scanOverlay.classList.remove('active');
                 scanBtn.disabled = false;
 
+                // Handle ToS requirement - show modal and retry
+                if (error.message === 'TOS_REQUIRED') {
+                    const accepted = await showToSModal();
+                    if (accepted) {
+                        // Retry the scan
+                        scanBtn.click();
+                    } else {
+                        heroDescription.innerHTML = '<span style="color: #eab308;">You must accept the Terms of Service to use CyberScan.</span>';
+                    }
+                    return;
+                }
+
                 // Show error
                 scanStatus.textContent = 'Error: ' + error.message;
                 setTimeout(() => {
@@ -1433,7 +1525,7 @@
                 // Show error in UI
                 badgeText.textContent = 'Scan Error';
                 statusText.textContent = 'Error';
-                heroDescription.innerHTML = `<span style="color: #ef4444;">Error scanning ${getDomain(url)}: ${error.message}</span><br><br>Make sure the backend server is running: <code>cd server && npm start</code>`;
+                heroDescription.innerHTML = `<span style="color: #ef4444;">Error: ${error.message}</span><br><br>Make sure the backend server is running: <code>cd server && npm start</code>`;
             }
         });
 

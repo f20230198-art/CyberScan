@@ -16,15 +16,19 @@ const cors = require('cors');
 const path = require('path');
 
 const scanRoutes = require('./routes/scan');
+const { getScanStats } = require('./middleware/security');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust proxy for correct IP detection (needed for rate limiting behind proxy)
+app.set('trust proxy', 1);
+
 // Middleware
 app.use(cors({
-    origin: '*', // Allow all origins for development
+    origin: '*',
     methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type']
+    allowedHeaders: ['Content-Type', 'X-ToS-Accepted']
 }));
 
 app.use(express.json());
@@ -33,8 +37,37 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files from parent directory (frontend)
 app.use(express.static(path.join(__dirname, '..')));
 
-// API Routes
+// API Routes (with rate limiting and ToS applied in routes)
 app.use('/api', scanRoutes);
+
+// Stats endpoint (admin)
+app.get('/api/stats', (req, res) => {
+    res.json({
+        success: true,
+        stats: getScanStats()
+    });
+});
+
+// Terms of Service endpoint
+app.get('/api/terms', (req, res) => {
+    res.json({
+        success: true,
+        terms: {
+            title: 'CyberScan Terms of Service',
+            version: '1.0',
+            lastUpdated: '2024-01-24',
+            content: [
+                '1. You may only scan websites you own or have explicit permission to test.',
+                '2. You will not use this tool for malicious purposes or unauthorized access.',
+                '3. You accept full responsibility for your actions when using this service.',
+                '4. You will not attempt to circumvent rate limits or abuse the service.',
+                '5. Scan results are for informational purposes only - we are not liable for any actions taken based on results.',
+                '6. We log scan activity (IP, URL, timestamp) for security and abuse prevention.'
+            ],
+            acceptanceRequired: true
+        }
+    });
+});
 
 // Root route - serve the frontend
 app.get('/', (req, res) => {
@@ -71,17 +104,25 @@ app.listen(PORT, () => {
 ║  ╚██████╗   ██║   ██████╔╝███████╗██║  ██║███████║╚██████╗    ║
 ║   ╚═════╝   ╚═╝   ╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝ ╚═════╝    ║
 ║                                                               ║
-║           Security Scanner Backend v1.0.0                     ║
+║           Security Scanner Backend v2.0.0                     ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
 
 🚀 Server running at: http://localhost:${PORT}
 📡 API endpoints:
-   POST /api/scan       - Full security scan
+   POST /api/scan       - Full security scan (rate limited, ToS required)
    POST /api/scan/quick - Quick scan (SSL + headers only)
    POST /api/scan/sqli  - SQL Injection test only
    POST /api/scan/xss   - XSS test only
    GET  /api/health     - Health check
+   GET  /api/terms      - Terms of Service
+   GET  /api/stats      - Scan statistics
+
+🔒 Security features:
+   ✓ Rate limiting: 5 scans per minute per IP
+   ✓ Terms of Service acceptance required
+   ✓ Scan logging enabled
+   ✓ Private IP blocking
 
 ⚠️  WARNING: Only scan websites you own or have permission to test!
 
