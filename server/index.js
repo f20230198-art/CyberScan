@@ -38,7 +38,7 @@ app.use('/api', scanRoutes);
 
 // Root route - serve the frontend
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '..', 'code.html'));
+    res.sendFile(path.join(__dirname, '..', 'index.html'));
 });
 
 // Error handling middleware
