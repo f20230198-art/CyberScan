@@ -1,0 +1,22 @@
+{
+    "name": "cyberscan",
+    "version": "2.0.0",
+    "description": "Professional website security scanner",
+    "main": "server/index.js",
+    "scripts": {
+        "start": "node server/index.js",
+        "server": "cd server && npm start"
+    },
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "keywords": [
+        "security",
+        "scanner",
+        "vulnerability",
+        "sqli",
+        "xss"
+    ],
+    "author": "",
+    "license": "MIT"
+}

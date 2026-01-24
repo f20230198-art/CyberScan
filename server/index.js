@@ -92,8 +92,8 @@ app.use((req, res) => {
     });
 });
 
-// Start server
-app.listen(PORT, () => {
+// Start server - bind to 0.0.0.0 for cloud deployment
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
