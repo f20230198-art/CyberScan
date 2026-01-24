@@ -1114,15 +1114,8 @@
     <script src="https://unpkg.com/@studio-freight/lenis@1.0.42/dist/lenis.min.js"></script>
 
     <script>
-        // Demo URL database
-        const urlDatabase = {
-            'google.com': { score: 95, threats: 0, status: 'Secure', urls: 1248, duration: '2.3s' },
-            'github.com': { score: 92, threats: 1, status: 'Secure', urls: 856, duration: '1.8s' },
-            'amazon.com': { score: 88, threats: 2, status: 'Secure', urls: 2341, duration: '4.1s' },
-            'old-blog.net': { score: 58, threats: 5, status: 'Warning', urls: 124, duration: '1.2s' },
-            'malware-test.com': { score: 15, threats: 14, status: 'Critical', urls: 89, duration: '0.9s' },
-            'phishing-site.ru': { score: 8, threats: 23, status: 'Dangerous', urls: 45, duration: '0.6s' },
-        };
+        // Backend API URL
+        const API_BASE = 'http://localhost:3001/api';
 
         // Elements
         const urlInput = document.getElementById('urlInput');
@@ -1182,18 +1175,14 @@
                         const p = Math.floor(obj.val);
                         counterPercent.textContent = p;
                         liquidFill.style.height = `${Math.min(p, 100)}%`;
-
-                        // Color based on FINAL target score, not current animation value
-                        // This prevents the color from animating through yellow
                     },
                     onComplete: () => {
-                        // Set the final color based on the target score
-                        const hue = (target / 100) * 120; // 0 = red, 120 = green
+                        const hue = (target / 100) * 120;
                         setThemeHue(hue);
                     }
                 });
 
-                // Set color immediately based on target (so it's correct from the start)
+                // Set color immediately based on target
                 const hue = (target / 100) * 120;
                 setThemeHue(hue);
             } else {
@@ -1213,31 +1202,47 @@
             }
         }
 
-        // Simulate scan
-        function simulateScan(url) {
-            const domain = getDomain(url);
-            const data = urlDatabase[domain] || {
-                score: Math.floor(Math.random() * 60) + 20,
-                threats: Math.floor(Math.random() * 10),
-                status: 'Unknown',
-                urls: Math.floor(Math.random() * 500) + 50,
-                duration: (Math.random() * 3 + 0.5).toFixed(1) + 's'
-            };
+        // Real API scan function
+        async function performRealScan(url) {
+            try {
+                const response = await fetch(`${API_BASE}/scan`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ url })
+                });
 
-            return data;
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+
+                return await response.json();
+            } catch (error) {
+                console.error('Scan error:', error);
+                throw error;
+            }
         }
 
-        // Update UI with scan results
-        function updateUI(data, url) {
+        // Update UI with real scan results
+        function updateUIWithRealResults(data, url) {
             const domain = getDomain(url);
+            const score = data.score || 0;
+            const issues = data.issues || [];
+            const details = data.details || {};
 
-            // Update status text
-            if (data.score >= 80) {
+            // Update status text based on real score
+            if (score >= 80) {
                 statusText.textContent = 'Secure';
                 badgeText.textContent = 'Website Verified Safe';
                 footerStatus.textContent = 'All Clear';
                 footerIcon.textContent = 'verified_user';
-            } else if (data.score >= 50) {
+            } else if (score >= 60) {
+                statusText.textContent = 'Moderate';
+                badgeText.textContent = 'Some Issues Found';
+                footerStatus.textContent = 'Review Recommended';
+                footerIcon.textContent = 'info';
+            } else if (score >= 40) {
                 statusText.textContent = 'Warning';
                 badgeText.textContent = 'Potential Risks Detected';
                 footerStatus.textContent = 'Needs Attention';
@@ -1249,88 +1254,67 @@
                 footerIcon.textContent = 'gpp_bad';
             }
 
-            // Update stats with animation
-            const statsToUpdate = [
-                { id: 'urlsScanned', value: data.urls.toLocaleString() },
-                { id: 'threatsFound', value: data.threats.toString() },
-                { id: 'scanDuration', value: data.duration }
-            ];
-
-            statsToUpdate.forEach(stat => {
-                const el = document.getElementById(stat.id);
-                if (el) {
-                    el.textContent = stat.value;
-                    if (typeof gsap !== 'undefined') {
-                        gsap.fromTo(el, { scale: 1.2, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.5, ease: "back.out" });
-                    }
-                }
-            });
-
-            // Update description
+            // Update description with real data
             const descEl = document.getElementById('heroDescription');
             if (descEl) {
-                descEl.innerHTML = data.score >= 80
-                    ? `<strong>${domain}</strong> passed security analysis. Found <span class="highlight">${data.threats} minor issues</span> across ${data.urls} URLs scanned.`
-                    : `<strong>${domain}</strong> has security concerns. Detected <span class="highlight">${data.threats} vulnerabilities</span> requiring attention.`;
+                const formsScanned = details.forms?.total || 0;
+                const totalIssues = issues.length;
+
+                if (score >= 80) {
+                    descEl.innerHTML = `<strong>${domain}</strong> passed security analysis. Scanned <span class="highlight">${formsScanned} forms</span> and found <span class="highlight">${totalIssues} minor issues</span>.`;
+                } else if (score >= 50) {
+                    descEl.innerHTML = `<strong>${domain}</strong> has some security concerns. Found <span class="highlight">${totalIssues} issues</span> that need attention.`;
+                } else {
+                    descEl.innerHTML = `<strong>${domain}</strong> has critical security vulnerabilities! Found <span class="highlight">${totalIssues} issues</span> requiring immediate action.`;
+                }
             }
 
-            // Animate breach cards
-            const breachCards = document.querySelectorAll('.breach-card');
-            if (typeof gsap !== 'undefined' && breachCards.length) {
-                gsap.fromTo(breachCards,
-                    { y: 20, opacity: 0.5 },
-                    { y: 0, opacity: 1, duration: 0.6, stagger: 0.15, ease: "power2.out" }
-                );
-            }
-
-            // Update SQL card
+            // Update SQL Injection card with real data
             const sqlBadge = document.getElementById('sqlBadge');
             const sqlEndpoints = document.getElementById('sqlEndpoints');
             const sqlRisk = document.getElementById('sqlRisk');
             const sqlRec = document.getElementById('sqlRec');
 
-            // Update XSS card
+            const sqliData = details.sqli || {};
+            const sqliVulns = sqliData.vulnerabilities?.length || 0;
+
+            if (sqliVulns === 0) {
+                if (sqlBadge) sqlBadge.textContent = 'Secure';
+                if (sqlEndpoints) sqlEndpoints.textContent = '0';
+                if (sqlRisk) sqlRisk.textContent = 'No vulnerabilities found';
+                if (sqlRec) sqlRec.textContent = 'No action needed';
+            } else {
+                if (sqlBadge) sqlBadge.textContent = 'VULNERABLE';
+                if (sqlEndpoints) sqlEndpoints.textContent = sqliVulns.toString();
+                if (sqlRisk) sqlRisk.textContent = 'Database access at risk';
+                if (sqlRec) sqlRec.textContent = 'Use parameterized queries!';
+            }
+
+            // Update XSS card with real data
             const xssBadge = document.getElementById('xssBadge');
             const xssPoints = document.getElementById('xssPoints');
             const xssSurface = document.getElementById('xssSurface');
             const xssRec = document.getElementById('xssRec');
 
-            if (data.score >= 80) {
-                if (sqlBadge) sqlBadge.textContent = 'Secure';
-                if (sqlEndpoints) sqlEndpoints.textContent = '0';
-                if (sqlRisk) sqlRisk.textContent = 'No risk detected';
-                if (sqlRec) sqlRec.textContent = 'No action needed';
+            const xssData = details.xss || {};
+            const xssVulns = xssData.vulnerabilities?.length || 0;
 
+            if (xssVulns === 0) {
                 if (xssBadge) xssBadge.textContent = 'Secure';
                 if (xssPoints) xssPoints.textContent = '0';
-                if (xssSurface) xssSurface.textContent = 'Protected';
+                if (xssSurface) xssSurface.textContent = 'Properly sanitized';
                 if (xssRec) xssRec.textContent = 'No action needed';
-            } else if (data.score >= 50) {
-                if (sqlBadge) sqlBadge.textContent = 'Warning';
-                if (sqlEndpoints) sqlEndpoints.textContent = Math.floor(data.threats / 2).toString();
-                if (sqlRisk) sqlRisk.textContent = 'Moderate exposure';
-                if (sqlRec) sqlRec.textContent = 'Review recommended';
-
-                if (xssBadge) xssBadge.textContent = 'Warning';
-                if (xssPoints) xssPoints.textContent = Math.ceil(data.threats / 2).toString();
-                if (xssSurface) xssSurface.textContent = 'Partial protection';
-                if (xssRec) xssRec.textContent = 'Update sanitization';
             } else {
-                if (sqlBadge) sqlBadge.textContent = 'Critical';
-                if (sqlEndpoints) sqlEndpoints.textContent = Math.floor(data.threats * 0.6).toString();
-                if (sqlRisk) sqlRisk.textContent = 'Full Admin Access Risk';
-                if (sqlRec) sqlRec.textContent = 'Immediate lockdown required';
-
-                if (xssBadge) xssBadge.textContent = 'High Risk';
-                if (xssPoints) xssPoints.textContent = Math.ceil(data.threats * 0.4).toString();
-                if (xssSurface) xssSurface.textContent = 'Session hijacking possible';
-                if (xssRec) xssRec.textContent = 'Critical fix needed';
+                if (xssBadge) xssBadge.textContent = 'VULNERABLE';
+                if (xssPoints) xssPoints.textContent = xssVulns.toString();
+                if (xssSurface) xssSurface.textContent = 'Script injection possible';
+                if (xssRec) xssRec.textContent = 'Escape all user input!';
             }
 
-            // Update findings table
+            // Update findings table with real issues
             const tableBody = document.getElementById('findingsTable');
             if (tableBody) {
-                if (data.threats === 0) {
+                if (issues.length === 0) {
                     tableBody.innerHTML = `
                         <tr>
                             <td colspan="4" style="text-align: center; color: #22c55e; padding: 3rem;">
@@ -1340,39 +1324,25 @@
                         </tr>
                     `;
                 } else {
-                    const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
-                    const issues = [
-                        'SQL Injection Vulnerability',
-                        'Cross-Site Scripting (XSS)',
-                        'CSRF Token Missing',
-                        'Insecure HTTP Headers',
-                        'Mixed Content Warning',
-                        'Outdated SSL/TLS Version',
-                        'Open Redirect Vulnerability',
-                        'Directory Traversal Risk'
-                    ];
-                    const paths = [
-                        '/api/v1/users/login',
-                        '/admin/dashboard',
-                        '/api/v2/payments',
-                        '/user/profile/edit',
-                        '/search?q=',
-                        '/files/download'
-                    ];
-
                     let rows = '';
-                    const numFindings = Math.min(data.threats, 6);
-                    for (let i = 0; i < numFindings; i++) {
-                        const sev = severities[Math.min(i, 3)];
+                    const severityMap = {
+                        'critical': 'CRITICAL',
+                        'high': 'HIGH',
+                        'medium': 'MEDIUM',
+                        'low': 'LOW'
+                    };
+
+                    issues.slice(0, 10).forEach((issue, i) => {
+                        const sev = severityMap[issue.severity] || 'MEDIUM';
                         rows += `
                             <tr>
                                 <td><span class="severity-badge"><span class="dot"></span> ${sev}</span></td>
-                                <td>${issues[i % issues.length]}</td>
-                                <td class="mono">${paths[i % paths.length]}</td>
-                                <td style="text-align: right;"><button class="fix-btn">Fix Now</button></td>
+                                <td>${issue.message}</td>
+                                <td class="mono">${issue.type}</td>
+                                <td style="text-align: right;"><button class="fix-btn">Details</button></td>
                             </tr>
                         `;
-                    }
+                    });
                     tableBody.innerHTML = rows;
 
                     // Animate new rows
@@ -1385,10 +1355,17 @@
                 }
             }
 
-            // Don't auto-scroll - let user scroll naturally
+            // Animate breach cards
+            const breachCards = document.querySelectorAll('.breach-card');
+            if (typeof gsap !== 'undefined' && breachCards.length) {
+                gsap.fromTo(breachCards,
+                    { y: 20, opacity: 0.5 },
+                    { y: 0, opacity: 1, duration: 0.6, stagger: 0.15, ease: "power2.out" }
+                );
+            }
         }
 
-        // Scan button click
+        // Scan button click - REAL SCAN
         scanBtn.addEventListener('click', async () => {
             const url = urlInput.value.trim();
             if (!url) {
@@ -1400,33 +1377,64 @@
             scanOverlay.classList.add('active');
             scanBtn.disabled = true;
 
-            // Simulate scanning steps
+            // Show real-time scanning steps
             const steps = [
-                'Checking DNS records...',
+                'Connecting to server...',
+                'Checking SSL/TLS certificate...',
                 'Analyzing security headers...',
-                'Scanning for SQL injection...',
-                'Testing XSS vulnerabilities...',
-                'Checking SSL certificates...',
-                'Finalizing report...'
+                'Crawling website for forms...',
+                'Testing for SQL injection...',
+                'Testing for XSS vulnerabilities...',
+                'Performing DNS lookup...',
+                'Calculating security score...'
             ];
 
-            for (let i = 0; i < steps.length; i++) {
-                scanStatus.textContent = steps[i];
-                await new Promise(r => setTimeout(r, 400));
+            let stepIndex = 0;
+            const stepInterval = setInterval(() => {
+                if (stepIndex < steps.length) {
+                    scanStatus.textContent = steps[stepIndex];
+                    stepIndex++;
+                }
+            }, 800);
+
+            try {
+                // Perform real scan
+                const data = await performRealScan(url);
+
+                clearInterval(stepInterval);
+
+                // Hide overlay
+                scanOverlay.classList.remove('active');
+                scanBtn.disabled = false;
+
+                if (data.success) {
+                    // Animate to real score
+                    animateCounter(data.score, 2.5);
+
+                    // Update UI with real results
+                    setTimeout(() => updateUIWithRealResults(data, url), 500);
+
+                    console.log('Scan results:', data);
+                } else {
+                    throw new Error(data.error || 'Scan failed');
+                }
+
+            } catch (error) {
+                clearInterval(stepInterval);
+                scanOverlay.classList.remove('active');
+                scanBtn.disabled = false;
+
+                // Show error
+                scanStatus.textContent = 'Error: ' + error.message;
+                setTimeout(() => {
+                    scanOverlay.classList.remove('active');
+                }, 2000);
+
+                // Show error in UI
+                badgeText.textContent = 'Scan Error';
+                statusText.textContent = 'Error';
+                heroDescription.innerHTML = `<span style="color: #ef4444;">Error scanning ${getDomain(url)}: ${error.message}</span><br><br>Make sure the backend server is running: <code>cd server && npm start</code>`;
             }
-
-            // Get results
-            const data = simulateScan(url);
-
-            // Hide overlay
-            scanOverlay.classList.remove('active');
-            scanBtn.disabled = false;
-
-            // Animate to new score
-            animateCounter(data.score, 2.5);
-
-            // Update UI
-            setTimeout(() => updateUI(data, url), 500);
         });
 
         // Preset buttons
@@ -1442,20 +1450,21 @@
             if (e.key === 'Enter') scanBtn.click();
         });
 
-        // Fix buttons
+        // Details/Fix buttons
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('fix-btn')) {
                 const btn = e.target;
-                btn.disabled = true;
-                btn.innerHTML = '<span class="animate-spin" style="display:inline-block;">◌</span>';
-                setTimeout(() => {
-                    btn.innerHTML = '✓ Fixed';
-                    btn.style.color = '#22c55e';
-                    if (typeof gsap !== 'undefined') {
-                        gsap.to(btn, { scale: 1.1, duration: 0.2, yoyo: true, repeat: 1 });
-                    }
-                }, 1500);
+                const row = btn.closest('tr');
+                const issueText = row?.querySelector('td:nth-child(2)')?.textContent || '';
+
+                // Show details in alert (can be improved with a modal)
+                alert(`Issue Details:\n\n${issueText}\n\nRecommendation: Review and fix this security issue in your application code.`);
             }
+        });
+
+        // Export button
+        document.getElementById('exportBtn')?.addEventListener('click', () => {
+            alert('Export functionality coming soon!\n\nThis will generate a detailed PDF/JSON security report.');
         });
     </script>
 </body>
