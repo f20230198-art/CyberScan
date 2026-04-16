@@ -1707,12 +1707,24 @@
         }
 
         // Real API scan function
+        // Uses /scan/passive by default (SSL, headers, DNS, cookies — no domain ownership needed).
+        // If the domain has been verified, uses /scan for full active testing (SQLi + XSS).
         async function performRealScan(url) {
             try {
-                // Check if ToS has been accepted
                 const tosAccepted = localStorage.getItem('cyberscan_tos_accepted') === 'true';
 
-                const response = await fetch(`${API_BASE}/scan`, {
+                // Check if domain is verified for active scanning
+                const domain = getDomain(url);
+                let isVerified = false;
+                try {
+                    const verifyRes = await fetch(`${API_BASE}/verify/status?domain=${encodeURIComponent(domain)}`);
+                    const verifyData = await verifyRes.json();
+                    isVerified = verifyData.verified === true;
+                } catch { /* default to passive */ }
+
+                const endpoint = isVerified ? '/scan' : '/scan/passive';
+
+                const response = await fetch(`${API_BASE}${endpoint}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1723,7 +1735,7 @@
 
                 const data = await response.json();
 
-                // Handle ToS requirement
+                // Handle ToS requirement (only from active scan)
                 if (response.status === 403 && data.tosRequired) {
                     throw new Error('TOS_REQUIRED');
                 }
@@ -1736,6 +1748,9 @@
                 if (!response.ok) {
                     throw new Error(data.error || `Server error: ${response.status}`);
                 }
+
+                // Tag so UI knows which scan type was performed
+                data.scanType = isVerified ? 'active' : 'passive';
 
                 return data;
             } catch (error) {
@@ -1861,8 +1876,14 @@
 
             const sqliData = details.sqli || {};
             const sqliVulns = sqliData.vulnerabilities?.length || 0;
+            const isPassive = data.scanType === 'passive';
 
-            if (sqliVulns === 0) {
+            if (isPassive) {
+                if (sqlBadge) sqlBadge.textContent = 'Not Tested';
+                if (sqlEndpoints) sqlEndpoints.textContent = '—';
+                if (sqlRisk) sqlRisk.textContent = 'Requires domain verification';
+                if (sqlRec) sqlRec.textContent = 'Verify domain ownership for active testing';
+            } else if (sqliVulns === 0) {
                 if (sqlBadge) sqlBadge.textContent = 'Secure';
                 if (sqlEndpoints) sqlEndpoints.textContent = '0';
                 if (sqlRisk) sqlRisk.textContent = 'No vulnerabilities found';
@@ -1883,7 +1904,12 @@
             const xssData = details.xss || {};
             const xssVulns = xssData.vulnerabilities?.length || 0;
 
-            if (xssVulns === 0) {
+            if (isPassive) {
+                if (xssBadge) xssBadge.textContent = 'Not Tested';
+                if (xssPoints) xssPoints.textContent = '—';
+                if (xssSurface) xssSurface.textContent = 'Requires domain verification';
+                if (xssRec) xssRec.textContent = 'Verify domain ownership for active testing';
+            } else if (xssVulns === 0) {
                 if (xssBadge) xssBadge.textContent = 'Secure';
                 if (xssPoints) xssPoints.textContent = '0';
                 if (xssSurface) xssSurface.textContent = 'Properly sanitized';
@@ -1966,11 +1992,11 @@
                 'Connecting to server...',
                 'Checking SSL/TLS certificate...',
                 'Analyzing security headers...',
-                'Crawling website for forms...',
-                'Testing for SQL injection...',
-                'Testing for XSS vulnerabilities...',
+                'Inspecting cookie attributes...',
                 'Performing DNS lookup...',
-                'Calculating security score...'
+                'Checking email authentication (SPF/DMARC)...',
+                'Analyzing CORS configuration...',
+                'Calculating CVSS-weighted score...'
             ];
 
             let stepIndex = 0;
