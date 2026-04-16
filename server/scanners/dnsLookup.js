@@ -19,9 +19,7 @@ async function lookupDNS(targetUrl) {
             mxRecords: [],
             txtRecords: [],
             cname: null,
-            reverseDNS: null,
-            domainAgeDays: null,
-            registrar: null
+            reverseDNS: null
         };
 
         // Get A record (IPv4)

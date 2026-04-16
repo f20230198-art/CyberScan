@@ -16,6 +16,7 @@ const cors = require('cors');
 const path = require('path');
 
 const scanRoutes = require('./routes/scan');
+const verifyRoutes = require('./routes/verify');
 const { getScanStats } = require('./middleware/security');
 
 const app = express();
@@ -39,6 +40,9 @@ app.use(express.static(path.join(__dirname, '..')));
 
 // API Routes (with rate limiting and ToS applied in routes)
 app.use('/api', scanRoutes);
+
+// Domain ownership verification routes
+app.use('/api/verify', verifyRoutes);
 
 // Stats endpoint (admin)
 app.get('/api/stats', (req, res) => {
@@ -110,21 +114,29 @@ app.listen(PORT, '0.0.0.0', () => {
 
 🚀 Server running at: http://localhost:${PORT}
 📡 API endpoints:
-   POST /api/scan       - Full security scan (rate limited, ToS required)
-   POST /api/scan/quick - Quick scan (SSL + headers only)
-   POST /api/scan/sqli  - SQL Injection test only
-   POST /api/scan/xss   - XSS test only
-   GET  /api/health     - Health check
-   GET  /api/terms      - Terms of Service
-   GET  /api/stats      - Scan statistics
+   POST /api/scan                - Full active scan  (ToS + verified domain required)
+   POST /api/scan/passive        - Passive scan: SSL + headers + DNS (no payloads, no auth needed)
+   POST /api/scan/quick          - Quick passive scan (SSL + headers only)
+   POST /api/scan/sqli           - SQLi test only   (ToS + verified domain required)
+   POST /api/scan/xss            - XSS test only    (ToS + verified domain required)
+   GET  /api/health              - Health check
+   GET  /api/terms               - Terms of Service
+   GET  /api/stats               - Scan statistics
+
+🔑 Domain ownership verification:
+   POST /api/verify/challenge    - Get DNS TXT challenge token for a domain
+   POST /api/verify/confirm      - Confirm ownership by resolving the TXT record
+   GET  /api/verify/status       - Check if a domain is currently verified
 
 🔒 Security features:
    ✓ Rate limiting: 5 scans per minute per IP
    ✓ Terms of Service acceptance required
+   ✓ DNS TXT ownership verification for active (payload) scans
+   ✓ Passive scanning available without verification (read-only, non-invasive)
    ✓ Scan logging enabled
-   ✓ Private IP blocking
+   ✓ Private IP / localhost blocking
 
-⚠️  WARNING: Only scan websites you own or have permission to test!
+⚠️  Active payload scanning is restricted to verified domain owners only.
 
 `);
 });

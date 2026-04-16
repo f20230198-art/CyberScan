@@ -118,24 +118,16 @@ function logScan(req, url, result) {
         scanLogs.shift();
     }
 
-    // Append to log file (async)
-    try {
-        let existingLogs = [];
-        if (fs.existsSync(LOG_FILE)) {
-            const content = fs.readFileSync(LOG_FILE, 'utf8');
-            existingLogs = JSON.parse(content);
-        }
-        existingLogs.push(logEntry);
-
-        // Keep only last 10000 entries in file
-        if (existingLogs.length > 10000) {
-            existingLogs = existingLogs.slice(-10000);
-        }
-
-        fs.writeFileSync(LOG_FILE, JSON.stringify(existingLogs, null, 2));
-    } catch (error) {
-        console.error('Error writing scan log:', error.message);
-    }
+    // Append to log file (non-blocking)
+    fs.promises.readFile(LOG_FILE, 'utf8')
+        .catch(() => '[]')
+        .then(content => {
+            const existingLogs = JSON.parse(content);
+            existingLogs.push(logEntry);
+            const trimmed = existingLogs.length > 10000 ? existingLogs.slice(-10000) : existingLogs;
+            return fs.promises.writeFile(LOG_FILE, JSON.stringify(trimmed, null, 2));
+        })
+        .catch(error => console.error('Error writing scan log:', error.message));
 
     // Console log
     console.log(`📝 Scan logged: ${ip} -> ${url} (Score: ${result?.score || 'N/A'})`);

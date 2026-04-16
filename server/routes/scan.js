@@ -8,12 +8,13 @@ const router = express.Router();
 
 const { checkSSL } = require('../scanners/sslChecker');
 const { checkHeaders } = require('../scanners/headerChecker');
-const { crawlForms, deepCrawl } = require('../scanners/formCrawler');
+const { crawlForms } = require('../scanners/formCrawler');
 const { testSQLi } = require('../scanners/sqliTester');
 const { testXSS, testURLParams } = require('../scanners/xssTester');
 const { lookupDNS } = require('../scanners/dnsLookup');
 const { calculateScore, getRecommendations } = require('../utils/scoreCalculator');
 const { rateLimiter, requireToS, logScan, validateURL } = require('../middleware/security');
+const { requireVerifiedDomain } = require('../middleware/domainVerification');
 
 // Validate URL format
 function isValidUrl(string) {
@@ -35,9 +36,9 @@ function normalizeUrl(url) {
 
 /**
  * POST /api/scan
- * Full security scan - Rate limited, ToS required
+ * Full security scan - Rate limited, ToS required, active payloads require verified domain
  */
-router.post('/scan', rateLimiter, requireToS, async (req, res) => {
+router.post('/scan', rateLimiter, requireToS, requireVerifiedDomain, async (req, res) => {
     const startTime = Date.now();
 
     try {
@@ -70,56 +71,38 @@ router.post('/scan', rateLimiter, requireToS, async (req, res) => {
             dns: null
         };
 
-        // 1. SSL/TLS Check
-        console.log('  📜 Checking SSL/TLS...');
-        results.ssl = await checkSSL(url);
+        // Stage 1 (parallel): passive recon — SSL + headers + DNS + form crawl all independent
+        console.log('  📜🛡️ 🌐🔎 Running passive recon in parallel (SSL, headers, DNS, form crawl)...');
+        const [ssl, headers, dns, forms] = await Promise.all([
+            checkSSL(url),
+            checkHeaders(url),
+            lookupDNS(url),
+            crawlForms(url),
+        ]);
+        results.ssl = ssl;
+        results.headers = headers;
+        results.dns = dns;
+        results.forms = forms;
 
-        // 2. Security Headers Check
-        console.log('  🛡️  Checking security headers...');
-        results.headers = await checkHeaders(url);
-
-        // 3. DNS Lookup
-        console.log('  🌐 Performing DNS lookup...');
-        results.dns = await lookupDNS(url);
-
-        // 4. Crawl for forms
-        console.log('  🔎 Crawling for forms...');
-        results.forms = await crawlForms(url);
-
-        // 5. SQL Injection Testing (only if forms found)
-        if (results.forms.forms && results.forms.forms.length > 0) {
-            console.log(`  💉 Testing ${results.forms.forms.length} forms for SQL injection...`);
-            results.sqli = await testSQLi(results.forms.forms, {
-                maxPayloads: options.deepScan ? 15 : 8,
-                timeout: 10000
-            });
-        } else {
-            results.sqli = {
-                tested: 0,
-                vulnerabilities: [],
-                vulnerable: false,
-                summary: 'No forms found to test'
-            };
+        // Stage 2 (parallel): active payload testing — SQLi, XSS forms, XSS URL params
+        const hasForms = results.forms.forms && results.forms.forms.length > 0;
+        if (hasForms) {
+            console.log(`  💉⚡ Testing ${results.forms.forms.length} forms for SQLi + XSS (parallel)...`);
         }
 
-        // 6. XSS Testing (only if forms found)
-        if (results.forms.forms && results.forms.forms.length > 0) {
-            console.log(`  ⚡ Testing ${results.forms.forms.length} forms for XSS...`);
-            results.xss = await testXSS(results.forms.forms, {
-                maxPayloads: options.deepScan ? 10 : 5,
-                timeout: 10000
-            });
-        } else {
-            results.xss = {
-                tested: 0,
-                vulnerabilities: [],
-                vulnerable: false,
-                summary: 'No forms found to test'
-            };
-        }
+        const [sqliResult, xssResult, urlParamResults] = await Promise.all([
+            hasForms
+                ? testSQLi(results.forms.forms, { maxPayloads: options.deepScan ? 15 : 8, timeout: 15000 })
+                : Promise.resolve({ tested: 0, vulnerabilities: [], vulnerable: false, summary: 'No forms found to test' }),
+            hasForms
+                ? testXSS(results.forms.forms, { maxPayloads: options.deepScan ? 10 : 5, timeout: 10000 })
+                : Promise.resolve({ tested: 0, vulnerabilities: [], vulnerable: false, summary: 'No forms found to test' }),
+            testURLParams(url),
+        ]);
 
-        // Test URL parameters for XSS
-        const urlParamResults = await testURLParams(url);
+        results.sqli = sqliResult;
+        results.xss = xssResult;
+
         if (urlParamResults.vulnerabilities && urlParamResults.vulnerabilities.length > 0) {
             results.xss.vulnerabilities.push(...urlParamResults.vulnerabilities);
             results.xss.vulnerable = true;
@@ -173,8 +156,69 @@ router.post('/scan', rateLimiter, requireToS, async (req, res) => {
 });
 
 /**
+ * POST /api/scan/passive
+ * Passive scan - SSL, headers, and DNS only. No payload injection.
+ * Does NOT require domain ownership verification (read-only, non-invasive).
+ */
+router.post('/scan/passive', async (req, res) => {
+    const startTime = Date.now();
+
+    try {
+        let { url } = req.body;
+
+        if (!url) {
+            return res.status(400).json({ error: 'URL is required' });
+        }
+
+        const validation = validateURL(url);
+        if (!validation.valid) {
+            return res.status(400).json({ success: false, error: validation.error });
+        }
+        url = validation.url;
+
+        url = normalizeUrl(url);
+
+        if (!isValidUrl(url)) {
+            return res.status(400).json({ error: 'Invalid URL format' });
+        }
+
+        console.log(`🔍 Passive scan for: ${url}`);
+
+        const [ssl, headers, dns] = await Promise.all([
+            checkSSL(url),
+            checkHeaders(url),
+            lookupDNS(url)
+        ]);
+
+        const results = { ssl, headers, dns };
+        const scoreResult = calculateScore(results);
+        const recommendations = getRecommendations(results);
+
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+        res.json({
+            success: true,
+            url,
+            scanType: 'passive',
+            note: 'Passive scan: SSL, headers, and DNS only. No payloads were sent. To run active SQLi/XSS testing, verify domain ownership via /api/verify/challenge.',
+            score: scoreResult.score,
+            status: scoreResult.status,
+            summary: scoreResult.summary,
+            issues: scoreResult.issues,
+            recommendations,
+            details: { ssl, headers, dns },
+            scanDuration: `${duration}s`
+        });
+
+    } catch (error) {
+        console.error('Passive scan error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
  * POST /api/scan/quick
- * Quick scan - SSL and headers only
+ * Quick scan - SSL and headers only (kept for backwards compatibility)
  */
 router.post('/scan/quick', async (req, res) => {
     const startTime = Date.now();
@@ -186,7 +230,11 @@ router.post('/scan/quick', async (req, res) => {
             return res.status(400).json({ error: 'URL is required' });
         }
 
-        url = normalizeUrl(url);
+        const validation = validateURL(url);
+        if (!validation.valid) {
+            return res.status(400).json({ success: false, error: validation.error });
+        }
+        url = normalizeUrl(validation.url);
 
         if (!isValidUrl(url)) {
             return res.status(400).json({ error: 'Invalid URL format' });
@@ -234,9 +282,9 @@ router.post('/scan/quick', async (req, res) => {
 
 /**
  * POST /api/scan/sqli
- * SQL Injection scan only
+ * SQL Injection scan only - requires verified domain ownership
  */
-router.post('/scan/sqli', async (req, res) => {
+router.post('/scan/sqli', requireToS, requireVerifiedDomain, async (req, res) => {
     try {
         let { url } = req.body;
 
@@ -244,7 +292,11 @@ router.post('/scan/sqli', async (req, res) => {
             return res.status(400).json({ error: 'URL is required' });
         }
 
-        url = normalizeUrl(url);
+        const validation = validateURL(url);
+        if (!validation.valid) {
+            return res.status(400).json({ success: false, error: validation.error });
+        }
+        url = normalizeUrl(validation.url);
 
         console.log(`💉 SQLi scan for: ${url}`);
 
@@ -279,9 +331,9 @@ router.post('/scan/sqli', async (req, res) => {
 
 /**
  * POST /api/scan/xss
- * XSS scan only
+ * XSS scan only - requires verified domain ownership
  */
-router.post('/scan/xss', async (req, res) => {
+router.post('/scan/xss', requireToS, requireVerifiedDomain, async (req, res) => {
     try {
         let { url } = req.body;
 
@@ -289,7 +341,11 @@ router.post('/scan/xss', async (req, res) => {
             return res.status(400).json({ error: 'URL is required' });
         }
 
-        url = normalizeUrl(url);
+        const validation = validateURL(url);
+        if (!validation.valid) {
+            return res.status(400).json({ success: false, error: validation.error });
+        }
+        url = normalizeUrl(validation.url);
 
         console.log(`⚡ XSS scan for: ${url}`);
 
@@ -332,7 +388,7 @@ router.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        version: '1.0.0'
+        version: '2.0.0'
     });
 });
 
